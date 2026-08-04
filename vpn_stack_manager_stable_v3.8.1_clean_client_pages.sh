@@ -469,7 +469,7 @@ mkdir -p /var/log/vpn-tools /var/lib/vpn-tools
 WARP_SERVICE_NAME="${WARP_SERVICE_NAME:-warp-svc}"
 SOCKS_ADDR="${SOCKS_ADDR:-127.0.0.1:40000}"
 TRACE_URL="${TRACE_URL:-https://www.cloudflare.com/cdn-cgi/trace}"
-WARP_FAIL_THRESHOLD="${WARP_FAIL_THRESHOLD:-2}"
+WARP_FAIL_THRESHOLD="${WARP_FAIL_THRESHOLD:-3}"
 
 port="${SOCKS_ADDR##*:}"
 
@@ -479,9 +479,9 @@ log_msg() {
 
 check_warp() {
   local t ip
-  t="$(curl -s --max-time 5 --socks5-hostname "$SOCKS_ADDR" "$TRACE_URL" 2>/dev/null || true)"
+  t="$(curl -s --max-time 8 --socks5-hostname "$SOCKS_ADDR" "$TRACE_URL" 2>/dev/null || true)"
   if grep -q 'warp=on' <<<"$t"; then return 0; fi
-  ip="$(curl -s --max-time 5 --socks5-hostname "$SOCKS_ADDR" https://api.ipify.org 2>/dev/null || true)"
+  ip="$(curl -s --max-time 8 --socks5-hostname "$SOCKS_ADDR" https://api.ipify.org 2>/dev/null || true)"
   grep -Eq '^(104\.28\.|162\.159\.)' <<<"$ip" && return 0
   return 1
 }
@@ -489,7 +489,7 @@ check_warp() {
 recover_warp() {
   log_msg "Выполняю перезапуск WARP..."
   systemctl restart "$WARP_SERVICE_NAME" >/dev/null 2>&1 || true
-  sleep 2
+  sleep 3
   warp-cli --accept-tos mode proxy >/dev/null 2>&1 || warp-cli mode proxy >/dev/null 2>&1 || true
   warp-cli --accept-tos proxy port "$port" >/dev/null 2>&1 || warp-cli proxy port "$port" >/dev/null 2>&1 || true
   warp-cli --accept-tos connect >/dev/null 2>&1 || warp-cli connect >/dev/null 2>&1 || true
@@ -550,7 +550,7 @@ Persistent=true
 
 [Install]
 WantedBy=timers.target
-EOF
+EOF_TIMER
 
     systemctl daemon-reload
     systemctl enable --now vpn-tools-warp-watchdog.timer
@@ -597,7 +597,7 @@ main_menu() {
         echo -e "${C_BOLD}${C_CYAN}     RouteX Ultimate VPN & Cascade Stack Manager      ${C_RESET}"
         echo -e "${C_BOLD}${C_BLUE}======================================================${C_RESET}"
         echo -e "⚙️  Статус 3x-ui панели: $(if [ "$xray_status" = "active" ]; then echo -e "${C_GREEN}работает${C_RESET}"; else echo -e "${C_RED}остановлен${C_RESET}"; fi)"
-        echo -e "🌐 Статус Nginx сервера: $(if [ "$nginx_status" = "active" ]; then echo -e "${C_GREEN}работает${C_RESET}"; else echo -e "${C_RED}остановлен${C_RESET}"; fi)"
+        echo -e "🌐 Статус Nginx сервера: $(if [ "$nginx_status" = "active" ]; then echo -e "${C_GREEN}работает${C_RESET}"; else echo -e "${C_RED}остановлен${C_RED}"; fi)"
         echo -e "🛡️ Статус CF WARP:     $(if [ "$warp_status" = "Connected" ]; then echo -e "${C_GREEN}подключен${C_RESET}"; else echo -e "${C_YELLOW}$warp_status${C_RESET}"; fi)"
         echo -e "${C_BLUE}------------------------------------------------------${C_RESET}"
         echo -e "  ${C_CYAN}1.${C_RESET} Авто-настройка ${C_BOLD}ВХОДНОГО RU СЕРВЕРА (Origin / Cascade Origin)${C_RESET}"
