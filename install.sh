@@ -448,8 +448,8 @@ EOF
     warp-cli --accept-tos proxy port 40000 || warp-cli proxy port 40000 || true
     warp-cli --accept-tos connect || warp-cli connect || true
 
-    # Install 30-Second Auto-Recovery Watchdog Service & Timer
-    echo -e "${C_CYAN}Настраиваю фоновую службу мгновенного автовосстановления WARP (30 сек Watchdog)...${C_RESET}"
+    # Install Instant 10-Second Auto-Recovery Watchdog Service & Timer
+    echo -e "${C_CYAN}Настраиваю фоновую службу мгновенного автовосстановления WARP (10 сек Watchdog)...${C_RESET}"
     mkdir -p /opt/vpn-tools/bin /var/log/vpn-tools /var/lib/vpn-tools
 
     cat << 'EOF_WATCHDOG' > /opt/vpn-tools/bin/warp-watchdog.sh
@@ -469,7 +469,7 @@ mkdir -p /var/log/vpn-tools /var/lib/vpn-tools
 WARP_SERVICE_NAME="${WARP_SERVICE_NAME:-warp-svc}"
 SOCKS_ADDR="${SOCKS_ADDR:-127.0.0.1:40000}"
 TRACE_URL="${TRACE_URL:-https://www.cloudflare.com/cdn-cgi/trace}"
-WARP_FAIL_THRESHOLD="${WARP_FAIL_THRESHOLD:-3}"
+WARP_FAIL_THRESHOLD="${WARP_FAIL_THRESHOLD:-2}"
 
 port="${SOCKS_ADDR##*:}"
 
@@ -477,30 +477,32 @@ log_msg() {
   echo "$(date '+%F %T') - $*" >> "$LOG_FILE"
 }
 
-check_warp() {
+check_warp_fast() {
   local t ip
-  t="$(curl -s --max-time 8 --socks5-hostname "$SOCKS_ADDR" "$TRACE_URL" 2>/dev/null || true)"
+  t="$(curl -s --max-time 3 --socks5-hostname "$SOCKS_ADDR" "$TRACE_URL" 2>/dev/null || true)"
   if grep -q 'warp=on' <<<"$t"; then return 0; fi
-  ip="$(curl -s --max-time 8 --socks5-hostname "$SOCKS_ADDR" https://api.ipify.org 2>/dev/null || true)"
-  grep -Eq '^(104\.28\.|162\.159\.)' <<<"$ip" && return 0
+
+  ip="$(curl -s --max-time 2 --socks5-hostname "$SOCKS_ADDR" https://api.ipify.org 2>/dev/null || true)"
+  if grep -Eq '^(104\.28\.|162\.159\.|172\.6[4-9]\.|172\.7[0-1]\.)' <<<"$ip"; then return 0; fi
+
   return 1
 }
 
 recover_warp() {
-  log_msg "Выполняю перезапуск WARP..."
+  log_msg "⚡ [INSTANT RECOVERY] Выполняю мгновенный перезапуск WARP..."
   systemctl restart "$WARP_SERVICE_NAME" >/dev/null 2>&1 || true
-  sleep 3
+  sleep 2
   warp-cli --accept-tos mode proxy >/dev/null 2>&1 || warp-cli mode proxy >/dev/null 2>&1 || true
   warp-cli --accept-tos proxy port "$port" >/dev/null 2>&1 || warp-cli proxy port "$port" >/dev/null 2>&1 || true
   warp-cli --accept-tos connect >/dev/null 2>&1 || warp-cli connect >/dev/null 2>&1 || true
-  sleep 4
-  check_warp
+  sleep 2
+  check_warp_fast
 }
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
-if check_warp; then
+if check_warp_fast; then
   echo "0" > "$FAIL_COUNT_FILE"
   echo "OK" > "$STATE_FILE"
   exit 0
@@ -509,17 +511,17 @@ else
   [[ -f "$FAIL_COUNT_FILE" ]] && fail_count="$(cat "$FAIL_COUNT_FILE" 2>/dev/null || echo 0)"
   fail_count=$((fail_count + 1))
   echo "$fail_count" > "$FAIL_COUNT_FILE"
-  log_msg "WARP check FAIL ${fail_count}/${WARP_FAIL_THRESHOLD}"
+  log_msg "WARP fast check FAIL ${fail_count}/${WARP_FAIL_THRESHOLD}"
   
   if (( fail_count >= WARP_FAIL_THRESHOLD )); then
-    log_msg "Порог превышен, перезапускаю WARP!"
+    log_msg "⚡ [INSTANT RECOVERY] Перезапускаю WARP за 10 секунд!"
     if recover_warp; then
-      log_msg "✅ WARP успешно восстановлен!"
+      log_msg "✅ [INSTANT RECOVERY] WARP успешно восстановлен за 10 секунд!"
       echo "0" > "$FAIL_COUNT_FILE"
       echo "OK" > "$STATE_FILE"
       exit 0
     else
-      log_msg "❌ Не удалось восстановить WARP"
+      log_msg "❌ Не удалось мгновенно восстановить WARP"
       echo "FAIL" > "$STATE_FILE"
       exit 1
     fi
@@ -531,7 +533,7 @@ EOF_WATCHDOG
 
     cat << 'EOF_SERVICE' > /etc/systemd/system/vpn-tools-warp-watchdog.service
 [Unit]
-Description=RouteX WARP Auto-Recovery Service
+Description=RouteX Instant WARP Auto-Recovery Service
 After=network.target
 
 [Service]
@@ -541,10 +543,10 @@ EOF
 
     cat << 'EOF_TIMER' > /etc/systemd/system/vpn-tools-warp-watchdog.timer
 [Unit]
-Description=RouteX WARP Watchdog Timer (every 30s)
+Description=RouteX Instant WARP Watchdog Timer (every 10s)
 
 [Timer]
-OnCalendar=*-*-* *:*:0/30
+OnCalendar=*-*-* *:*:0/10
 AccuracySec=1s
 Persistent=true
 
@@ -555,7 +557,7 @@ EOF_TIMER
     systemctl daemon-reload
     systemctl enable --now vpn-tools-warp-watchdog.timer
     
-    echo -e "${C_GREEN}WARP успешно установлен, запущен (127.0.0.1:40000) и защищен 30s Watchdog службу!${C_RESET}"
+    echo -e "${C_GREEN}WARP успешно установлен, запущен (127.0.0.1:40000) и защищен 10s Instant Watchdog службой!${C_RESET}"
     pause
 }
 
@@ -603,7 +605,7 @@ main_menu() {
         echo -e "  ${C_CYAN}1.${C_RESET} Авто-настройка ${C_BOLD}ВХОДНОГО RU СЕРВЕРА (Origin / Cascade Origin)${C_RESET}"
         echo -e "  ${C_CYAN}2.${C_RESET} Авто-настройка ${C_BOLD}ЗАРУБЕЖНОГО ВЫХОДНОГО СЕРВЕРА (Exit Node)${C_RESET}"
         echo -e "  ${C_CYAN}3.${C_RESET} Управление службами, статусами и логами"
-        echo -e "  ${C_CYAN}4.${C_RESET} Установить / Настроить ${C_BOLD}Cloudflare WARP SOCKS5 (с 30s Watchdog)${C_RESET}"
+        echo -e "  ${C_CYAN}4.${C_RESET} Установить / Настроить ${C_BOLD}Cloudflare WARP SOCKS5 (с 10s Instant Watchdog)${C_RESET}"
         echo -e "  ${C_CYAN}0.${C_RESET} Выход"
         echo -e "${C_BLUE}======================================================${C_RESET}"
         read -p "Выберите опцию [0-4]: " opt
