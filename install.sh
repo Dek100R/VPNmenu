@@ -541,18 +541,16 @@ EOF
 
     cat << 'EOF_TIMER' > /etc/systemd/system/vpn-tools-warp-watchdog.timer
 [Unit]
-Description=Run RouteX WARP Watchdog every 30 seconds
+Description=RouteX WARP Watchdog Timer (every 30s)
 
 [Timer]
-OnBootSec=10s
-OnUnitActiveSec=30s
+OnCalendar=*-*-* *:*:0/30
 AccuracySec=1s
 Persistent=true
-Unit=vpn-tools-warp-watchdog.service
 
 [Install]
 WantedBy=timers.target
-EOF
+EOF_TIMER
 
     systemctl daemon-reload
     systemctl enable --now vpn-tools-warp-watchdog.timer
